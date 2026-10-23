@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "MERIDIAN",
+    "slug": "harmonic-wolfe-trader-t1sqxsgj8a0zkt85oezpf",
+    "owner": "mphotaulela",
+    "version": "4.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0a0a0a",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.mphotaulela.meridian",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#0a0a0a"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bc7f87c0-af6a-4583-9468-67f13dff79e5"
+      }
+    }
+  }
+}
