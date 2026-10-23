@@ -2,7 +2,7 @@
   "expo": {
     "name": "MERIDIAN",
     "slug": "harmonic-wolfe-trader-t1sqxsgj8a0zkt85oezpf",
-    "owner": "mphotaulela",
+    "owner": "jadentaulela667",
     "version": "4.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -32,7 +32,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "bc7f87c0-af6a-4583-9468-67f13dff79e5"
+        "projectId": "8a7efca7-850b-4a1a-bff5-1f0bdd403e23"
       }
     }
   }
