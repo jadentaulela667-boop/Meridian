@@ -9,16 +9,22 @@ jobs:
     name: Install and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 18
+        uses: actions/setup-node@v4
         with:
           node-version: 18
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          cache: npm
+
+      - name: Setup EAS CLI
+        run: npm install -g eas-cli@latest
+
       - name: Install dependencies
         run: npm install
+
       - name: Build on EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas build --platform android --profile preview --non-interactive --no-wait
-        
