@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "MERIDIAN",
-    "slug": "harmonic-wolfe-trader-t1sqxsgj8a0zkt85oezpf",
+    "slug": "meridian-v42",
     "owner": "jadentaulela667s-team",
     "version": "4.2.0",
     "orientation": "portrait",
@@ -10,14 +10,12 @@
       "backgroundColor": "#0a0a0a",
       "resizeMode": "contain"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "package": "com.mphotaulela.meridian",
+      "package": "com.jadentaulela667steam.meridian",
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0a"
       }
