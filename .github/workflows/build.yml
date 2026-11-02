@@ -3,7 +3,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
 jobs:
   build:
     name: Install and build
@@ -11,18 +10,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node 18
         uses: actions/setup-node@v4
         with:
           node-version: 18
-
       - name: Setup EAS CLI
         run: npm install -g eas-cli@latest
-
       - name: Install dependencies
         run: npm install
-
       - name: Build on EAS
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
