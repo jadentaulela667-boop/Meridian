@@ -3,7 +3,7 @@
     "name": "MERIDIAN",
     "slug": "meridian-v42",
     "owner": "jadentaulela667s-team",
-    "version": "5.0.0",
+    "version": "6.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
@@ -27,7 +27,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_EXACT_ALARM",
-        "android.permission.SCHEDULE_EXACT_ALARM"
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.ACCESS_NETWORK_STATE"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
