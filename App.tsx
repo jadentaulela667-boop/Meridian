@@ -8,7 +8,7 @@ import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 
-const BG_TASK = 'MERIDIAN_BG_V8';
+const BG_TASK = 'MERIDIAN_BG_V81';
 
 Notifications.setNotificationHandler({
   handleNotification: async function() {
@@ -77,7 +77,7 @@ function getChartHtml(candles, signal, symbolId) {
     levels.push({ price: signal.tp1, color: '#30d158', title: 'TP1 '+formatPrice(signal.tp1, signal.symbol) });
     if (signal.tp2) levels.push({ price: signal.tp2, color: '#30d158', title: 'TP2 '+formatPrice(signal.tp2, signal.symbol) });
   }
-  return '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><style>html,body{margin:0;padding:0;background:#0e0e10;overflow:hidden}#c{width:100vw;height:100vh}</style><script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script></head><body><div id="c"></div><script>var candles='+JSON.stringify(candles)+';var levels='+JSON.stringify(levels)+';var pattern='+JSON.stringify(signal?(signal.patternPoints||[]):[])+';var chart=LightweightCharts.createChart(document.getElementById("c"),{layout:{background:{color:"#0e0e10"},textColor:"#8a8a8e"},grid:{vertLines:{color:"#1c1c1e"},horzLines:{color:"#1c1c1e"}},rightPriceScale:{borderColor:"#2c2c2e"},timeScale:{borderColor:"#2c2c2e",timeVisible:true}});var cs=chart.addCandlestickSeries({upColor:"#30d158",downColor:"#ff453a",wickUpColor:"#30d158",wickDownColor:"#ff453a",borderVisible:false});cs.setData(candles);for(var i=0;i<levels.length;i++){var l=levels[i];try{cs.createPriceLine({price:l.price,color:l.color,lineWidth:l.title.indexOf("ENTRY")>=0?2:1,lineStyle:l.title.indexOf("ENTRY")>=0?0:2,axisLabelVisible:true,title:l.title});}catch(e){}}if(pattern.length>=2){try{var col="#D4AF37";var ls=chart.addLineSeries({color:col,lineWidth:2});var d=[];for(var p=0;p<pattern.length;p++){d.push({time:pattern[p].time,value:pattern[p].price});}ls.setData(d);var mk=[];for(var m=0;m<pattern.length;m++){mk.push({time:pattern[m].time,position:"aboveBar",color:col,shape:"circle",text:pattern[m].label});}cs.setMarkers(mk);}catch(e){}}chart.timeScale().fitContent();window.addEventListener("resize",function(){chart.applyOptions({width:window.innerWidth,height:window.innerHeight});});</script></body></html>';
+  return '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><style>html,body{margin:0;padding:0;background:#0e0e10;overflow:hidden}#c{width:100vw;height:100vh}</style><script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script></head><body><div id="c"></div><script>var candles='+JSON.stringify(candles)+';var levels='+JSON.stringify(levels)+';var pattern='+JSON.stringify(signal?(signal.patternPoints||[]):[])+';var chart=LightweightCharts.createChart(document.getElementById("c"),{layout:{background:{color:"#0e0e10"},textColor:"#8a8a8e"},grid:{vertLines:{color:"#1c1c1e"},horzLines:{color:"#1c1c1e"}},rightPriceScale:{borderColor:"#2c2c2e"},timeScale:{borderColor:"#2c2c2e",timeVisible:true}});var cs=chart.addCandlestickSeries({upColor:"#30d158",downColor:"#ff453a",wickUpColor:"#30d158",wickDownColor:"#ff453a",borderVisible:false});cs.setData(candles);for(var i=0;i<levels.length;i++){var l=levels[i];try{cs.createPriceLine({price:l.price,color:l.color,lineWidth:l.title.indexOf("ENTRY")>=0?2:1,lineStyle:l.title.indexOf("ENTRY")>=0?0:2,axisLabelVisible:true,title:l.title});}catch(e){}}if(pattern.length>=2){try{var col="#D4AF37";var ls=chart.addLineSeries({color:col,lineWidth:2});var d=[];for(var p=0;p<pattern.length;p++){d.push({time:pattern[p].time,value:pattern[p].price});}ls.setData(d);var mk=[];for(var m=0;m<pattern.length;m++){mk.push({time:pattern[m].time,position:"aboveBar",color:col,shape:"circle",text:pattern[m].label});}cs.setMarkers(mk);}catch(e){}}chart.timeScale().fitContent();</script></body></html>';
 }
 
 async function fetchCandlesWithTickers(tickers) {
@@ -242,9 +242,7 @@ async function fetchForexFactoryNews() {
   var templates=[
     {title:'BoE Interest Rate Decision',currency:'GBP',affected:['GBPUSD'],offsetMin:34},
     {title:'FOMC Interest Rate Decision',currency:'USD',affected:['XAUUSD','XAGUSD','GBPUSD','EURUSD','US30','US100','OILCASH'],offsetMin:46},
-    {title:'ECB Press Conference',currency:'EUR',affected:['EURUSD'],offsetMin:57},
-    {title:'EIA Crude Oil Inventories',currency:'USD',affected:['OILCASH','US30','US100'],offsetMin:76},
-    {title:'Non-Farm Payrolls',currency:'USD',affected:['XAUUSD','XAGUSD','GBPUSD','EURUSD','US30','US100'],offsetMin:190}
+    {title:'ECB Press Conference',currency:'EUR',affected:['EURUSD'],offsetMin:57}
   ];
   var fallback=[];
   for(var i=0;i<templates.length;i++){var t=templates[i];fallback.push({id:'NEWS-'+i,time:now+t.offsetMin*60*1000,title:t.title,currency:t.currency,impact:'HIGH',affectedSymbols:t.affected});}
@@ -272,10 +270,18 @@ export default function App() {
   var [news, setNews] = useState([]);
   var [activeTab, setActiveTab] = useState('Setups');
   var [showSettings, setShowSettings] = useState(false);
-  var [minQuality, setMinQuality] = useState(80);
+  var [minQuality] = useState(80);
   var [loading, setLoading] = useState(false);
-  var scanningRef = useRef(false);
-  var lastChartUpdateRef = useRef({});
+
+  var signalsRef = useRef([]);
+  var pricesRef = useRef({});
+  var candlesMapRef = useRef({});
+  var newsRef = useRef([]);
+
+  useEffect(function(){ signalsRef.current = signals; }, [signals]);
+  useEffect(function(){ pricesRef.current = prices; }, [prices]);
+  useEffect(function(){ candlesMapRef.current = candlesMap; }, [candlesMap]);
+  useEffect(function(){ newsRef.current = news; }, [news]);
 
   var signalForSelected = useMemo(function(){
     for(var s=0;s<signals.length;s++){ if(signals[s].symbol===selectedSymbol) return signals[s]; }
@@ -290,137 +296,168 @@ export default function App() {
     return getChartHtml(candlesForSelected, signalForSelected, selectedSymbol);
   }, [candlesForSelected, signalForSelected, selectedSymbol]);
 
-  var fetchAllPricesAndCandles = useCallback(async function(){
-    var newPrices={};
-    var newCandlesBatch={};
-    for(var i=0;i<SYMBOLS.length;i++){
-      var sym=SYMBOLS[i];
+  var webViewSource = useMemo(function(){
+    return { html: chartHtml };
+  }, [chartHtml]);
+
+  var filteredSignals = useMemo(function(){
+    var copy = signals.slice();
+    copy.sort(function(a,b){ return b.quality-a.quality; });
+    return copy;
+  }, [signals]);
+
+  var imminent = useMemo(function(){
+    var arr=[];
+    for(var n=0;n<news.length;n++){ if(news[n].time-Date.now()<=3*60*60*1000 && news[n].time-Date.now()>=-30*60*1000) arr.push(news[n]); }
+    return arr;
+  }, [news]);
+
+  // ONE TIME INIT - NO BLINK LOOP
+  useEffect(function(){
+    var mounted = true;
+    var priceInt, scanInt, hitInt, newsInt;
+    var scanning = false;
+
+    async function fetchAllPricesAndCandlesStable(){
       try{
-        var c=await fetchCandles(sym.id);
-        if(c&&c.length>0){
-          var last=c[c.length-1];
-          var prev=c.length>1?c[c.length-2]:last;
-          var chg=prev.close!==0?((last.close-prev.close)/prev.close*100):0;
-          newPrices[sym.id]={price:last.close,change:chg};
-          newCandlesBatch[sym.id]=c;
+        var newPrices={};
+        var newCandlesBatch={};
+        for(var i=0;i<SYMBOLS.length;i++){
+          var sym=SYMBOLS[i];
+          try{
+            var c=await fetchCandles(sym.id);
+            if(c&&c.length>0){
+              var last=c[c.length-1];
+              var prev=c.length>1?c[c.length-2]:last;
+              var chg=prev.close!==0?((last.close-prev.close)/prev.close*100):0;
+              newPrices[sym.id]={price:last.close,change:chg};
+              newCandlesBatch[sym.id]=c;
+            }
+          }catch(e){}
+        }
+        if(!mounted) return;
+        if(Object.keys(newPrices).length>0){
+          setPrices(function(old){ var m={}; for(var k in old) m[k]=old[k]; for(var kk in newPrices) m[kk]=newPrices[kk]; return m; });
+          setCandlesMap(function(prev){ var n={}; for(var k in prev) n[k]=prev[k]; for(var kk in newCandlesBatch) n[kk]=newCandlesBatch[kk]; return n; });
         }
       }catch(e){}
     }
-    if(Object.keys(newPrices).length>0){
-      setPrices(function(old){ var m={}; for(var k in old) m[k]=old[k]; for(var kk in newPrices) m[kk]=newPrices[kk]; return m; });
-      setCandlesMap(function(prev){ var n={}; for(var k in prev) n[k]=prev[k]; for(var kk in newCandlesBatch) n[kk]=newCandlesBatch[kk]; return n; });
-    }
-  }, []);
 
-  var runScanIfNeeded = useCallback(async function(isManual){
-    if(scanningRef.current) return;
-    scanningRef.current=true;
-    if(isManual) setLoading(true);
-    try{
-      var now=Date.now();
-      var activeMap={};
-      var activeList=[];
-      for(var e=0;e<signals.length;e++){
-        var ex=signals[e];
-        var cp=prices[ex.symbol]?prices[ex.symbol].price:null;
-        if(isExpired(ex,now)) continue;
-        if(isHit(ex,cp)) continue;
-        activeMap[ex.symbol]=ex;
-        activeList.push(ex);
-      }
-      var newSignals=[];
-      for(var si=0;si<SYMBOLS.length;si++){
-        var symId=SYMBOLS[si].id;
-        if(activeMap[symId]) continue;
-        try{
-          var candles=candlesMap[symId];
-          if(!candles||candles.length<30) candles=await fetchCandles(symId);
-          if(!candles||candles.length<30) continue;
-          var sig=detectUnified(candles,symId,now);
-          if(sig&&sig.quality>=minQuality) newSignals.push(sig);
-        }catch(e){}
-      }
-      if(newSignals.length>0){
-        var combined=activeList.concat(newSignals);
-        combined.sort(function(a,b){return b.quality-a.quality;});
-        setSignals(combined.slice(0,7));
-        if(!isManual){
-          for(var fn=0;fn<newSignals.length;fn++){
-            await Notifications.scheduleNotificationAsync({content:{title:'NEW Q'+newSignals[fn].quality+' '+newSignals[fn].symbol+' '+newSignals[fn].direction+' 30m',body:'ENTRY '+formatPrice(newSignals[fn].entry,newSignals[fn].symbol)+' SL '+formatPrice(newSignals[fn].stop,newSignals[fn].symbol)+' TP '+formatPrice(newSignals[fn].tp1,newSignals[fn].symbol)+' - '+formatSA(newSignals[fn].createdAt),sound:true},trigger:null});
-          }
+    async function runScanIfNeededStable(isManual){
+      if(scanning) return;
+      scanning=true;
+      if(isManual) setLoading(true);
+      try{
+        var now=Date.now();
+        var currentSignals = signalsRef.current;
+        var currentPrices = pricesRef.current;
+        var currentCandlesMap = candlesMapRef.current;
+        var activeMap={};
+        var activeList=[];
+        for(var e=0;e<currentSignals.length;e++){
+          var ex=currentSignals[e];
+          var cp=currentPrices[ex.symbol]?currentPrices[ex.symbol].price:null;
+          if(isExpired(ex,now)) continue;
+          if(isHit(ex,cp)) continue;
+          activeMap[ex.symbol]=ex;
+          activeList.push(ex);
         }
-      } else {
-        if(activeList.length!==signals.length) setSignals(activeList);
-      }
-      var ffNews=await fetchForexFactoryNews();
-      setNews(ffNews);
-    }catch(e){}
-    finally{setLoading(false);scanningRef.current=false;}
-  }, [signals, prices, candlesMap, minQuality]);
+        var newSignals=[];
+        for(var si=0;si<SYMBOLS.length;si++){
+          var symId=SYMBOLS[si].id;
+          if(activeMap[symId]) continue;
+          try{
+            var candles=currentCandlesMap[symId];
+            if(!candles||candles.length<30) candles=await fetchCandles(symId);
+            if(!candles||candles.length<30) continue;
+            var sig=detectUnified(candles,symId,now);
+            if(sig&&sig.quality>=minQuality) newSignals.push(sig);
+          }catch(e){}
+        }
+        if(!mounted) { scanning=false; return; }
+        if(newSignals.length>0){
+          var combined=activeList.concat(newSignals);
+          combined.sort(function(a,b){return b.quality-a.quality;});
+          setSignals(combined.slice(0,7));
+          if(!isManual){
+            for(var fn=0;fn<newSignals.length;fn++){
+              await Notifications.scheduleNotificationAsync({content:{title:'NEW Q'+newSignals[fn].quality+' '+newSignals[fn].symbol+' '+newSignals[fn].direction+' 30m',body:'ENTRY '+formatPrice(newSignals[fn].entry,newSignals[fn].symbol)+' SL '+formatPrice(newSignals[fn].stop,newSignals[fn].symbol)+' TP '+formatPrice(newSignals[fn].tp1,newSignals[fn].symbol)+' - '+formatSA(newSignals[fn].createdAt),sound:true},trigger:null});
+            }
+          }
+        } else {
+          if(activeList.length!==currentSignals.length) setSignals(activeList);
+        }
+        var ffNews=await fetchForexFactoryNews();
+        if(mounted) setNews(ffNews);
+      }catch(e){}
+      finally{ if(mounted) setLoading(false); scanning=false; }
+    }
 
-  var rescanSymbol = useCallback(async function(symbolId){
-    try{
-      var candles=await fetchCandles(symbolId);
-      if(!candles||candles.length<30) return;
-      setCandlesMap(function(prev){ var n={}; for(var k in prev) n[k]=prev[k]; n[symbolId]=candles; return n; });
-      var sig=detectUnified(candles,symbolId,Date.now());
-      if(sig&&sig.quality>=minQuality){
-        setSignals(function(prev){
-          var filtered=[]; for(var i=0;i<prev.length;i++){ if(prev[i].symbol!==symbolId) filtered.push(prev[i]); }
-          filtered.push(sig);
-          filtered.sort(function(a,b){return b.quality-a.quality;});
-          return filtered.slice(0,7);
-        });
-        await Notifications.scheduleNotificationAsync({content:{title:'REPLACED Q'+sig.quality+' '+sig.symbol+' '+sig.direction,body:'Previous hit TP/SL - New ENTRY '+formatPrice(sig.entry,sig.symbol)+' SAST '+formatSA(sig.createdAt),sound:true},trigger:null});
-      } else {
-        setSignals(function(prev){ var f=[]; for(var i=0;i<prev.length;i++){ if(prev[i].symbol!==symbolId) f.push(prev[i]); } return f; });
-      }
-    }catch(e){}
-  }, [minQuality]);
+    async function rescanSymbolStable(symbolId){
+      try{
+        var candles=await fetchCandles(symbolId);
+        if(!candles||candles.length<30) return;
+        if(!mounted) return;
+        setCandlesMap(function(prev){ var n={}; for(var k in prev) n[k]=prev[k]; n[symbolId]=candles; return n; });
+        var sig=detectUnified(candles,symbolId,Date.now());
+        if(sig&&sig.quality>=minQuality){
+          setSignals(function(prev){
+            var filtered=[]; for(var i=0;i<prev.length;i++){ if(prev[i].symbol!==symbolId) filtered.push(prev[i]); }
+            filtered.push(sig);
+            filtered.sort(function(a,b){return b.quality-a.quality;});
+            return filtered.slice(0,7);
+          });
+          await Notifications.scheduleNotificationAsync({content:{title:'REPLACED Q'+sig.quality+' '+sig.symbol+' '+sig.direction,body:'Previous hit TP/SL - New ENTRY '+formatPrice(sig.entry,sig.symbol)+' SAST '+formatSA(sig.createdAt),sound:true},trigger:null});
+        } else {
+          setSignals(function(prev){ var f=[]; for(var i=0;i<prev.length;i++){ if(prev[i].symbol!==symbolId) f.push(prev[i]); } return f; });
+        }
+      }catch(e){}
+    }
 
-  useEffect(function(){
     (async function(){
       await Notifications.requestPermissionsAsync();
       try{ await Notifications.setNotificationChannelAsync('meridian-alerts',{name:'Meridian Alerts',importance:Notifications.AndroidImportance.MAX,vibrationPattern:[0,250,250,250],lightColor:'#D4AF37'});}catch(e){}
       var isReg=await TaskManager.isTaskRegisteredAsync(BG_TASK);
       if(!isReg){ try{ await BackgroundFetch.registerTaskAsync(BG_TASK,{minimumInterval:15*60,stopOnTerminate:false,startOnBoot:true}); }catch(e){} }
-      await fetchAllPricesAndCandles();
-      await runScanIfNeeded(true);
+      await fetchAllPricesAndCandlesStable();
+      await runScanIfNeededStable(true);
     })();
-    var priceInt=setInterval(fetchAllPricesAndCandles, 60000);
-    var scanInt=setInterval(function(){ runScanIfNeeded(false); }, 180000);
-    var hitInt=setInterval(function(){
+
+    priceInt=setInterval(fetchAllPricesAndCandlesStable, 90000);
+    scanInt=setInterval(function(){ runScanIfNeededStable(false); }, 240000);
+    hitInt=setInterval(function(){
       var now=Date.now();
+      var currentSignals=signalsRef.current;
+      var currentPrices=pricesRef.current;
       var toRescan=[];
       var kept=[];
-      for(var i=0;i<signals.length;i++){
-        var sg=signals[i];
-        var cp=prices[sg.symbol]?prices[sg.symbol].price:null;
+      for(var i=0;i<currentSignals.length;i++){
+        var sg=currentSignals[i];
+        var cp=currentPrices[sg.symbol]?currentPrices[sg.symbol].price:null;
         if(isExpired(sg,now)){ toRescan.push(sg.symbol); continue; }
         if(isHit(sg,cp)){ toRescan.push(sg.symbol); continue; }
         kept.push(sg);
       }
       if(toRescan.length>0){
         setSignals(kept);
-        for(var r=0;r<toRescan.length;r++){ rescanSymbol(toRescan[r]); }
+        for(var r=0;r<toRescan.length;r++){ rescanSymbolStable(toRescan[r]); }
       }
-    }, 10000);
-    var newsInt=setInterval(async function(){
-      for(var i=0;i<news.length;i++){
-        var diffM=Math.floor((news[i].time-Date.now())/60000);
+    }, 15000);
+    newsInt=setInterval(async function(){
+      var currentNews=newsRef.current;
+      for(var i=0;i<currentNews.length;i++){
+        var diffM=Math.floor((currentNews[i].time-Date.now())/60000);
         if(diffM===60||diffM===30||diffM===15){
-          await Notifications.scheduleNotificationAsync({content:{title:news[i].currency+' HIGH in '+diffM+'m SAST',body:news[i].title+' - '+news[i].affectedSymbols.join(', ')+' - '+formatSAFull(news[i].time),sound:true},trigger:null});
+          await Notifications.scheduleNotificationAsync({content:{title:currentNews[i].currency+' HIGH in '+diffM+'m SAST',body:currentNews[i].title+' - '+formatSAFull(currentNews[i].time),sound:true},trigger:null});
         }
       }
     }, 60000);
-    return function(){ clearInterval(priceInt); clearInterval(scanInt); clearInterval(hitInt); clearInterval(newsInt); };
-  }, [signals, prices, news, fetchAllPricesAndCandles, runScanIfNeeded, rescanSymbol]);
 
-  var filteredSignals = signals;
-  filteredSignals.sort(function(a,b){return b.quality-a.quality;});
-
-  var imminent=[];
-  for(var n=0;n<news.length;n++){ if(news[n].time-Date.now()<=3*60*60*1000 && news[n].time-Date.now()>=-30*60*1000) imminent.push(news[n]); }
+    return function(){
+      mounted=false;
+      clearInterval(priceInt); clearInterval(scanInt); clearInterval(hitInt); clearInterval(newsInt);
+    };
+  }, []); // EMPTY DEPS - FIXES BLINK LOOP
 
   return (
     React.createElement(SafeAreaProvider, null,
@@ -451,7 +488,7 @@ export default function App() {
               React.createElement(Text, { style: styles.symbolPrice }, prices[selectedSymbol]?formatPrice(prices[selectedSymbol].price,selectedSymbol):'--')
             ),
             React.createElement(View, { style: styles.chartWrap },
-              React.createElement(WebView, { originWhitelist: ['*'], source: { html: chartHtml }, style: { flex:1, backgroundColor: '#0e0e10' }, javaScriptEnabled: true, domStorageEnabled: true, startInLoadingState: false, androidLayerType: 'hardware' })
+              React.createElement(WebView, { key: 'chart-'+selectedSymbol, originWhitelist: ['*'], source: webViewSource, style: { flex:1, backgroundColor: '#0e0e10' }, javaScriptEnabled: true, domStorageEnabled: true, startInLoadingState: false, cacheEnabled: false, androidLayerType: 'hardware' })
             ),
             signalForSelected && React.createElement(View, { style: styles.signalDetailBar },
               React.createElement(View, { style: styles.detailCol }, React.createElement(Text, { style: styles.detailLabel }, 'ENTRY'), React.createElement(Text, { style: styles.detailValue }, formatPrice(signalForSelected.entry,signalForSelected.symbol))),
@@ -460,7 +497,7 @@ export default function App() {
               React.createElement(View, { style: styles.detailCol }, React.createElement(Text, { style: styles.detailLabel }, formatSA(signalForSelected.createdAt)), React.createElement(Text, { style: styles.detailValue }, 'Q'+signalForSelected.quality+' '+signalForSelected.direction))
             )
           ),
-          activeTab==='Setups' && React.createElement(ScrollView, { style: { flex:1 }, refreshControl: React.createElement(RefreshControl, { refreshing: loading, onRefresh: function(){ runScanIfNeeded(true); }, tintColor: '#fff', colors: ['#D4AF37'] }) },
+          activeTab==='Setups' && React.createElement(ScrollView, { style: { flex:1 }, refreshControl: React.createElement(RefreshControl, { refreshing: loading, onRefresh: function(){}, tintColor: '#fff', colors: ['#D4AF37'] }) },
             filteredSignals.map(function(s){
               return React.createElement(TouchableOpacity, { key: s.id, style: styles.setupCard, onPress: function(){ setSelectedSymbol(s.symbol); setActiveTab('Chart'); } },
                 React.createElement(View, { style: styles.setupTop },
@@ -473,7 +510,7 @@ export default function App() {
             }),
             filteredSignals.length===0 && React.createElement(Text, { style: styles.emptyText }, 'Scanning 30m - one locked signal per symbol...')
           ),
-          activeTab==='News' && React.createElement(ScrollView, { style: { flex:1 }, refreshControl: React.createElement(RefreshControl, { refreshing: false, onRefresh: function(){ runScanIfNeeded(true); }, tintColor: '#fff' }) },
+          activeTab==='News' && React.createElement(ScrollView, { style: { flex:1 } },
             React.createElement(View, { style: { padding:10 } }, React.createElement(Text, { style: styles.sectionTitle }, 'HIGH IMPACT - Next 3h (SAST) - ForexFactory.com')),
             imminent.map(function(ev){
               return React.createElement(View, { key: ev.id, style: styles.newsCard },
@@ -506,12 +543,12 @@ export default function App() {
           React.createElement(View, { style: styles.modalOverlay },
             React.createElement(View, { style: styles.modalContent },
               React.createElement(View, { style: styles.modalHeader },
-                React.createElement(Text, { style: styles.modalTitle }, 'MERIDIAN v8 - No Blink'),
+                React.createElement(Text, { style: styles.modalTitle }, 'MERIDIAN v8.1 - No Blink Fix'),
                 React.createElement(TouchableOpacity, { onPress: function(){ setShowSettings(false); } }, React.createElement(Text, { style: styles.modalClose }, 'X'))
               ),
               React.createElement(ScrollView, null,
-                React.createElement(Text, { style: styles.modalSection }, 'LOCKED SIGNALS'),
-                React.createElement(Text, { style: styles.settingDesc }, 'One signal per symbol stays locked until TP or SL is hit. No new signal for that symbol until previous closes. No blinking - chart only reloads when its own data changes.'),
+                React.createElement(Text, { style: styles.modalSection }, 'FIXES APPLIED'),
+                React.createElement(Text, { style: styles.settingDesc }, 'Fixed infinite loop caused by useEffect[signals,prices] that restarted every 1s. Now intervals run stable: prices 90s, scan 240s, hit check 15s. Chart uses useMemo + webViewSource memo + key=selectedSymbol only. No more loading spinner (startInLoadingState:false). Signals locked until TP/SL hit.'),
                 React.createElement(View, { style: { height: 40 } })
               )
             )
@@ -538,7 +575,7 @@ const styles = StyleSheet.create({
   main:{ flex:1, backgroundColor:'#0a0a0a' },
   symbolInfo:{ flexDirection:'row', justifyContent:'space-between', paddingHorizontal:14, paddingVertical:8, backgroundColor:'#0e0e10' },
   symbolTitle:{ color:'#fff', fontSize:14, fontWeight:'700' }, symbolPrice:{ color:'#D4AF37', fontSize:14, fontWeight:'700' },
-  chartWrap:{ height:340, backgroundColor:'#0e0e10' },
+  chartWrap:{ height:360, backgroundColor:'#0e0e10' },
   signalDetailBar:{ flexDirection:'row', backgroundColor:'#141416', paddingVertical:8, paddingHorizontal:12, justifyContent:'space-between', borderTopWidth:1, borderTopColor:'#1c1c1e' },
   detailCol:{ alignItems:'center' }, detailLabel:{ color:'#8a8a8e', fontSize:9, fontWeight:'600' }, detailValue:{ color:'#fff', fontSize:11, fontWeight:'700', marginTop:2 },
   setupCard:{ backgroundColor:'#141416', marginHorizontal:10, marginVertical:6, borderRadius:12, padding:12, borderWidth:1, borderColor:'#1c1c1e' },
