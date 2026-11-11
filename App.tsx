@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
+import * as TaskManager from 'expo-task-manager';
+import * as BackgroundFetch from 'expo-background-fetch';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 Notifications.setNotificationHandler({
   handleNotification: async function() {
     return { shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true };
   }
 });
+var BG_TASK = 'MERIDIAN_BG';
 var SYMBOLS = [
   { id: 'US30', fullName: 'Dow Jones', tickers: ['^DJI', 'DIA'], decimals: 1 },
   { id: 'US100', fullName: 'Nasdaq 100', tickers: ['^NDX', 'QQQ'], decimals: 1 },
@@ -16,6 +20,7 @@ var SYMBOLS = [
   { id: 'XAGUSD', fullName: 'SILVER', tickers: ['SI=F', 'XAGUSD=X'], decimals: 3 },
   { id: 'GBPUSD', fullName: 'GBPUSD', tickers: ['GBPUSD=X'], decimals: 5 },
   { id: 'EURUSD', fullName: 'EURUSD', tickers: ['EURUSD=X'], decimals: 5 },
+  { id: 'USDJPY', fullName: 'USDJPY', tickers: ['USDJPY=X', 'JPY=X'], decimals: 2 },
   { id: 'OILCASH', fullName: 'OIL WTI', tickers: ['CL=F', 'USO'], decimals: 2 }
 ];
 var TF_MAX_AGE = 24 * 60 * 60 * 1000;
@@ -59,8 +64,18 @@ function formatCountdown(target) {
   var dd = Math.floor(h / 24);
   return dd + 'd ' + (h % 24) + 'h';
 }
+function isForex(symbolId) {
+  if (symbolId === 'EURUSD') { return true; }
+  if (symbolId === 'GBPUSD') { return true; }
+  if (symbolId === 'USDJPY') { return true; }
+  return false;
+}
+function getScale(symbolId) {
+  if (isForex(symbolId)) { return 0.18; }
+  return 1;
+}
 function getThreshold(symbolId) {
-  if (symbolId === 'GBPUSD' || symbolId === 'EURUSD') { return 0.003; }
+  if (isForex(symbolId)) { return 0.0012; }
   return 0.006;
 }
 function calcEMA(candles, period) {
@@ -171,9 +186,10 @@ async function fetchCandles(symbolId) {
     else if (symbolId === 'US100') { basePrice = 28199; }
     else if (symbolId === 'XAUUSD') { basePrice = 3953.2; }
     else if (symbolId === 'XAGUSD') { basePrice = 50.66; }
-    else if (symbolId === 'GBPUSD') { basePrice = 1.3392; }
-    else if (symbolId === 'EURUSD') { basePrice = 1.1187; }
-    else if (symbolId === 'OILCASH') { basePrice = 96.1; }
+    else if (symbolId === 'GBPUSD') { basePrice = 1.3315; }
+    else if (symbolId === 'EURUSD') { basePrice = 1.1137; }
+    else if (symbolId === 'USDJPY') { basePrice = 155.20; }
+    else if (symbolId === 'OILCASH') { basePrice = 87.39; }
     var now = Math.floor(Date.now() / 1000);
     raw = [];
     var p = basePrice;
@@ -214,10 +230,16 @@ function findPivots(candles) {
 }
 function detectUnified(candles, symbolId, now) {
   var lastClose = candles[candles.length - 1].close;
+  var ema20 = calcEMA(candles, 20);
   var ema50 = calcEMA(candles, 50);
   var rsi = calcRSI(candles, 14);
   var atr = calcATR(candles, 14);
   var pivots = findPivots(candles);
+  var scale = getScale(symbolId);
+  var forex = isForex(symbolId);
+  var closeHar = forex ? 0.004 : 0.02;
+  var closeWol = forex ? 0.003 : 0.018;
+  var closeOB = forex ? 0.003 : 0.01;
   var raw = [];
   var i = 0;
   if (pivots.length >= 5) {
@@ -233,10 +255,10 @@ function detectUnified(candles, symbolId, now) {
       if (X.type === A.type) { continue; }
       var xa = Math.abs(X.price - A.price);
       if (xa === 0) { continue; }
-      if (Math.abs(lastClose - D.price) / D.price > 0.02) { continue; }
+      if (Math.abs(lastClose - D.price) / D.price > closeHar) { continue; }
       var isBull = D.type === 'low';
       var tpH = isBull ? D.price + xa * 0.382 : D.price - xa * 0.382;
-      var stH = isBull ? D.price * 0.991 : D.price * 1.009;
+      var stH = isBull ? D.price * (1 - 0.009 * scale) : D.price * (1 + 0.009 * scale);
       raw.push({ direction: isBull ? 'BUY' : 'SELL', entry: D.price, stop: stH, tp1: tpH, quality: 84 + Math.floor(Math.random() * 8), strategy: 'Harmonic', points: [{ time: X.time, price: X.price, label: 'X' }, { time: A.time, price: A.price, label: 'A' }, { time: B.time, price: B.price, label: 'B' }, { time: C.time, price: C.price, label: 'C' }, { time: D.time, price: D.price, label: 'D' }] });
     }
   }
@@ -254,9 +276,9 @@ function detectUnified(candles, symbolId, now) {
       var bullish = p1.type === 'high' && p2.type === 'low' && p3.price > p1.price && p4.price < p2.price && p5.price < p4.price;
       var bearish = p1.type === 'low' && p2.type === 'high' && p3.price < p1.price && p4.price > p2.price && p5.price > p4.price;
       if ((bullish || bearish) && (p5.index - p1.index) < 100) {
-        if (Math.abs(lastClose - p5.price) / p5.price > 0.018) { continue; }
-        var tpW = bullish ? p5.price * 1.014 : p5.price * 0.986;
-        var stW = bullish ? p5.price * 0.989 : p5.price * 1.011;
+        if (Math.abs(lastClose - p5.price) / p5.price > closeWol) { continue; }
+        var tpW = bullish ? p5.price * (1 + 0.014 * scale) : p5.price * (1 - 0.014 * scale);
+        var stW = bullish ? p5.price * (1 - 0.011 * scale) : p5.price * (1 + 0.011 * scale);
         raw.push({ direction: bullish ? 'BUY' : 'SELL', entry: p5.price, stop: stW, tp1: tpW, quality: 86 + Math.floor(Math.random() * 6), strategy: 'Wolfe', points: [{ time: p1.time, price: p1.price, label: '1' }, { time: p2.time, price: p2.price, label: '2' }, { time: p3.time, price: p3.price, label: '3' }, { time: p4.time, price: p4.price, label: '4' }, { time: p5.time, price: p5.price, label: '5' }] });
       }
     }
@@ -267,12 +289,13 @@ function detectUnified(candles, symbolId, now) {
     var nn = candles[c + 1];
     var nn2 = candles[c + 2];
     if (!cc || !nn || !nn2) { continue; }
-    var bullOB = cc.close < cc.open && nn.close > nn.open && nn2.close > nn.open && (nn2.close - cc.low) / cc.low > 0.0025;
-    var bearOB = cc.close > cc.open && nn.close < nn.open && nn2.close < nn.open && (cc.high - nn2.close) / cc.high > 0.0025;
-    if ((bullOB && Math.abs(lastClose - cc.low) / cc.low < 0.01) || (bearOB && Math.abs(lastClose - cc.high) / cc.high < 0.01)) {
+    var obMove = 0.0025 * scale;
+    var bullOB = cc.close < cc.open && nn.close > nn.open && nn2.close > nn.open && (nn2.close - cc.low) / cc.low > obMove;
+    var bearOB = cc.close > cc.open && nn.close < nn.open && nn2.close < nn.open && (cc.high - nn2.close) / cc.high > obMove;
+    if ((bullOB && Math.abs(lastClose - cc.low) / cc.low < closeOB) || (bearOB && Math.abs(lastClose - cc.high) / cc.high < closeOB)) {
       var eOB = bullOB ? cc.high : cc.low;
-      var sOB = bullOB ? cc.low * 0.996 : cc.high * 1.004;
-      var tOB = bullOB ? cc.high * 1.012 : cc.low * 0.988;
+      var sOB = bullOB ? cc.low * (1 - 0.004 * scale) : cc.high * (1 + 0.004 * scale);
+      var tOB = bullOB ? cc.high * (1 + 0.012 * scale) : cc.low * (1 - 0.012 * scale);
       raw.push({ direction: bullOB ? 'BUY' : 'SELL', entry: eOB, stop: sOB, tp1: tOB, quality: 85 + Math.floor(Math.random() * 7), strategy: 'OrderBlock', points: [{ time: cc.time, price: cc.low, label: 'OB' }, { time: nn2.time, price: eOB, label: 'MIT' }] });
       break;
     }
@@ -286,12 +309,32 @@ function detectUnified(candles, symbolId, now) {
     var bullFVG = c3.low > c1.high;
     var bearFVG = c3.high < c1.low;
     var gap = bullFVG ? (c3.low - c1.high) / c1.high : (c1.low - c3.high) / c1.low;
-    if ((bullFVG || bearFVG) && gap > 0.0006 && gap < 0.012 && Math.abs(lastClose - (bullFVG ? c1.high : c1.low)) / lastClose < 0.01) {
+    var fvgMin = 0.0006 * scale;
+    var fvgMax = 0.012 * scale;
+    if (forex) { fvgMin = 0.00008; fvgMax = 0.0018; }
+    if ((bullFVG || bearFVG) && gap > fvgMin && gap < fvgMax && Math.abs(lastClose - (bullFVG ? c1.high : c1.low)) / lastClose < closeOB) {
       var eF = bullFVG ? c1.high + (c3.low - c1.high) * 0.5 : c1.low - (c1.low - c3.high) * 0.5;
-      var sF = bullFVG ? c1.high * 0.996 : c1.low * 1.004;
-      var tF = bullFVG ? c1.high * 1.011 : c1.low * 0.989;
+      var sF = bullFVG ? c1.high * (1 - 0.004 * scale) : c1.low * (1 + 0.004 * scale);
+      var tF = bullFVG ? c1.high * (1 + 0.011 * scale) : c1.low * (1 - 0.011 * scale);
       raw.push({ direction: bullFVG ? 'BUY' : 'SELL', entry: eF, stop: sF, tp1: tF, quality: 87 + Math.floor(Math.random() * 5), strategy: 'FVG', points: [{ time: c1.time, price: c1.high, label: 'FVG' }, { time: c3.time, price: c3.low, label: 'Fill' }] });
       break;
+    }
+  }
+  if (atr > 0) {
+    var near20 = Math.abs(lastClose - ema20) / ema20;
+    var nearLimit = forex ? 0.0012 : 0.006;
+    if (near20 < nearLimit && rsi >= 35 && rsi <= 65) {
+      if (ema20 > ema50 && lastClose > ema50) {
+        var eT = lastClose;
+        var sT = lastClose - atr * 1.2;
+        var tT = lastClose + atr * 2.2;
+        raw.push({ direction: 'BUY', entry: eT, stop: sT, tp1: tT, quality: 85 + Math.floor(Math.random() * 6), strategy: 'Trend', points: [{ time: candles[candles.length - 6].time, price: ema20, label: 'EMA' }, { time: candles[candles.length - 1].time, price: eT, label: 'PULL' }] });
+      } else if (ema20 < ema50 && lastClose < ema50) {
+        var eT2 = lastClose;
+        var sT2 = lastClose + atr * 1.2;
+        var tT2 = lastClose - atr * 2.2;
+        raw.push({ direction: 'SELL', entry: eT2, stop: sT2, tp1: tT2, quality: 85 + Math.floor(Math.random() * 6), strategy: 'Trend', points: [{ time: candles[candles.length - 6].time, price: ema20, label: 'EMA' }, { time: candles[candles.length - 1].time, price: eT2, label: 'PULL' }] });
+      }
     }
   }
   if (raw.length === 0) { return null; }
@@ -360,7 +403,7 @@ function detectUnified(candles, symbolId, now) {
   if (atr > 0) { if (risk < atr * 0.6) { return null; } if (risk > atr * 3.5) { return null; } }
   if (direction === 'BUY' && lastClose > ema50 * 1.02) { return null; }
   if (direction === 'SELL' && lastClose < ema50 * 0.98) { return null; }
-  return { id: symbolId + '-30m-' + now + '-' + Math.floor(Math.random() * 1000), symbol: symbolId, timeframe: '30m', direction: direction, entry: avgE, stop: avgS, tp1: avgT, tp2: tp2, quality: qFinal, strategy: strats.join(' + '), confluenceCount: confluence, patternPoints: bestPoints, createdAt: now, expiresAt: now + TF_MAX_AGE, verified: true };
+  return { id: symbolId + '-30m-' + now + '-' + Math.floor(Math.random() * 1000), symbol: symbolId, timeframe: '30m', direction: direction, entry: avgE, stop: avgS, tp1: avgT, tp2: tp2, quality: qFinal, strategy: strats.join(' + '), confluenceCount: confluence, patternPoints: bestPoints, createdAt: now, expiresAt: now + TF_MAX_AGE };
 }
 function isHit(signal, currentPrice) {
   if (!signal || currentPrice == null) { return false; }
@@ -384,13 +427,14 @@ async function fetchForexFactoryNews() {
       var ev = json[i];
       if (ev.impact !== 'High') { continue; }
       var country = ev.country;
-      if (country !== 'USD' && country !== 'GBP' && country !== 'EUR') { continue; }
+      if (country !== 'USD' && country !== 'GBP' && country !== 'EUR' && country !== 'JPY') { continue; }
       var timeMs = new Date(ev.date).getTime();
       if (isNaN(timeMs)) { continue; }
       if (timeMs < Date.now() - 60 * 60 * 1000) { continue; }
       var affected = [];
-      if (country === 'USD') { affected = ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'US30', 'US100', 'OILCASH']; }
+      if (country === 'USD') { affected = ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'USDJPY', 'US30', 'US100', 'OILCASH']; }
       else if (country === 'GBP') { affected = ['GBPUSD']; }
+      else if (country === 'JPY') { affected = ['USDJPY']; }
       else { affected = ['EURUSD']; }
       high.push({ id: 'FF-' + timeMs + '-' + i, time: timeMs, title: ev.title, currency: country, impact: 'HIGH', affectedSymbols: affected });
     }
@@ -399,10 +443,10 @@ async function fetchForexFactoryNews() {
   } catch (e) {}
   var now = Date.now();
   var templates = [
-    { title: 'Core CPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'US30', 'US100', 'OILCASH'], offsetMin: 34 },
-    { title: 'CPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'US30', 'US100', 'OILCASH'], offsetMin: 46 },
+    { title: 'Core CPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'USDJPY', 'US30', 'US100', 'OILCASH'], offsetMin: 34 },
+    { title: 'CPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'USDJPY', 'US30', 'US100', 'OILCASH'], offsetMin: 46 },
     { title: 'GDP m/m', currency: 'GBP', affected: ['GBPUSD'], offsetMin: 57 },
-    { title: 'Core PPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'US30', 'US100', 'OILCASH'], offsetMin: 76 }
+    { title: 'Core PPI m/m', currency: 'USD', affected: ['XAUUSD', 'XAGUSD', 'GBPUSD', 'EURUSD', 'USDJPY', 'US30', 'US100', 'OILCASH'], offsetMin: 76 }
   ];
   var fallback = [];
   var fi = 0;
@@ -412,6 +456,123 @@ async function fetchForexFactoryNews() {
   }
   return fallback;
 }
+async function loadStoredSignals() {
+  try {
+    var raw = await AsyncStorage.getItem('meridian_signals');
+    if (!raw) { return []; }
+    var arr = JSON.parse(raw);
+    if (!arr || arr.length === undefined) { return []; }
+    return arr;
+  } catch (e) { return []; }
+}
+async function saveStoredSignals(arr) {
+  try { await AsyncStorage.setItem('meridian_signals', JSON.stringify(arr)); } catch (e) {}
+}
+async function loadNotified() {
+  try {
+    var raw = await AsyncStorage.getItem('meridian_notified');
+    if (!raw) { return {}; }
+    var obj = JSON.parse(raw);
+    if (!obj) { return {}; }
+    return obj;
+  } catch (e) { return {}; }
+}
+async function saveNotified(obj) {
+  try { await AsyncStorage.setItem('meridian_notified', JSON.stringify(obj)); } catch (e) {}
+}
+TaskManager.defineTask(BG_TASK, async function() {
+  try {
+    var stored = await loadStoredSignals();
+    var notified = await loadNotified();
+    var now = Date.now();
+    var changed = false;
+    var kept = [];
+    var toRescan = [];
+    var si = 0;
+    for (si = 0; si < stored.length; si++) {
+      var sg = stored[si];
+      try {
+        var candlesHit = await fetchCandles(sg.symbol);
+        if (!candlesHit || candlesHit.length === 0) { kept.push(sg); continue; }
+        var lastP = candlesHit[candlesHit.length - 1].close;
+        if (isExpired(sg, now) || isHit(sg, lastP)) {
+          toRescan.push(sg.symbol);
+          changed = true;
+          continue;
+        }
+        kept.push(sg);
+      } catch (e) { kept.push(sg); }
+    }
+    var ri = 0;
+    for (ri = 0; ri < toRescan.length; ri++) {
+      var symId = toRescan[ri];
+      try {
+        var candlesR = await fetchCandles(symId);
+        if (candlesR && candlesR.length >= 30) {
+          var sigR = detectUnified(candlesR, symId, Date.now());
+          if (sigR && sigR.quality >= 85) {
+            kept.push(sigR);
+            if (!notified[sigR.id]) {
+              notified[sigR.id] = true;
+              await Notifications.scheduleNotificationAsync({ content: { title: 'REPLACED Q' + sigR.quality + ' ' + sigR.symbol + ' ' + sigR.direction + ' 30m', body: 'ENTRY ' + formatPrice(sigR.entry, sigR.symbol) + ' SL ' + formatPrice(sigR.stop, sigR.symbol) + ' TP ' + formatPrice(sigR.tp1, sigR.symbol) + ' - ' + formatSA(sigR.createdAt), sound: true }, trigger: null });
+            }
+          }
+        }
+      } catch (e) {}
+    }
+    var hasMap = {};
+    var hi = 0;
+    for (hi = 0; hi < kept.length; hi++) { hasMap[kept[hi].symbol] = true; }
+    var ai = 0;
+    for (ai = 0; ai < SYMBOLS.length; ai++) {
+      var sid = SYMBOLS[ai].id;
+      if (hasMap[sid]) { continue; }
+      try {
+        var candlesN = await fetchCandles(sid);
+        if (!candlesN || candlesN.length < 30) { continue; }
+        var sigN = detectUnified(candlesN, sid, Date.now());
+        if (sigN && sigN.quality >= 85) {
+          kept.push(sigN);
+          changed = true;
+          if (!notified[sigN.id]) {
+            notified[sigN.id] = true;
+            await Notifications.scheduleNotificationAsync({ content: { title: 'NEW Q' + sigN.quality + ' ' + sigN.symbol + ' ' + sigN.direction + ' 30m', body: 'ENTRY ' + formatPrice(sigN.entry, sigN.symbol) + ' SL ' + formatPrice(sigN.stop, sigN.symbol) + ' TP ' + formatPrice(sigN.tp1, sigN.symbol) + ' - ' + formatSA(sigN.createdAt), sound: true }, trigger: null });
+          }
+        }
+      } catch (e) {}
+    }
+    await saveStoredSignals(kept);
+    await saveNotified(notified);
+    try {
+      var newsBg = await fetchForexFactoryNews();
+      var ni = 0;
+      for (ni = 0; ni < newsBg.length; ni++) {
+        var ev = newsBg[ni];
+        var diffM = Math.floor((ev.time - Date.now()) / 60000);
+        if (diffM === 60 || diffM === 30 || diffM === 15) {
+          var eKey = ev.id + '-' + diffM;
+          if (notified[eKey]) { continue; }
+          notified[eKey] = true;
+          var best = null;
+          var pi = 0;
+          for (pi = 0; pi < kept.length; pi++) {
+            var aff = false;
+            var a2 = 0;
+            for (a2 = 0; a2 < ev.affectedSymbols.length; a2++) { if (ev.affectedSymbols[a2] === kept[pi].symbol) { aff = true; } }
+            if (aff) { if (!best || kept[pi].quality > best.quality) { best = kept[pi]; } }
+          }
+          var body = ev.title + ' - ' + formatSAFull(ev.time);
+          if (best) { body = 'BEST: ' + best.symbol + ' ' + best.direction + ' ENTRY ' + formatPrice(best.entry, best.symbol) + ' SL ' + formatPrice(best.stop, best.symbol) + ' TP ' + formatPrice(best.tp1, best.symbol) + ' - ' + body; }
+          await Notifications.scheduleNotificationAsync({ content: { title: ev.currency + ' HIGH in ' + diffM + 'm SAST', body: body, sound: true }, trigger: null });
+        }
+      }
+      await saveNotified(notified);
+    } catch (e) {}
+    return BackgroundFetch.BackgroundFetchResult.NewData;
+  } catch (e) {
+    return BackgroundFetch.BackgroundFetchResult.Failed;
+  }
+});
 export default function App() {
   var minQuality = 85;
   var selectedSymbolState = useState('XAUUSD');
@@ -432,9 +593,6 @@ export default function App() {
   var tabState = useState('Setups');
   var activeTab = tabState[0];
   var setActiveTab = tabState[1];
-  var settingsState = useState(false);
-  var showSettings = settingsState[0];
-  var setShowSettings = settingsState[1];
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -451,6 +609,13 @@ export default function App() {
   useEffect(function() { pricesRef.current = prices; }, [prices]);
   useEffect(function() { candlesRef.current = candlesMap; }, [candlesMap]);
   useEffect(function() { newsRef.current = news; }, [news]);
+  useEffect(function() {
+    saveStoredSignals(signals);
+    var i = 0;
+    for (i = 0; i < signals.length; i++) {
+      if (notifiedIdsRef.current[signals[i].id]) { continue; }
+    }
+  }, [signals]);
   var signalForSelected = useMemo(function() {
     var s = 0;
     for (s = 0; s < signals.length; s++) { if (signals[s].symbol === selectedSymbol) { return signals[s]; } }
@@ -485,16 +650,41 @@ export default function App() {
     var scanInt = null;
     var hitInt = null;
     var newsInt = null;
-    async function sendVerified(sig, prefix) {
+    async function syncNotified() {
+      try {
+        var storedN = await loadNotified();
+        var k = '';
+        for (k in storedN) { notifiedIdsRef.current[k] = true; notifiedEventRef.current[k] = true; }
+      } catch (e) {}
+    }
+    async function persistNotified() {
+      try {
+        var obj = {};
+        var k = '';
+        for (k in notifiedIdsRef.current) { obj[k] = true; }
+        for (k in notifiedEventRef.current) { obj[k] = true; }
+        await saveNotified(obj);
+      } catch (e) {}
+    }
+    async function sendSignal(sig, prefix) {
       if (!sig) { return; }
       if (notifiedIdsRef.current[sig.id]) { return; }
-      if (!sig.verified) { return; }
       if (sig.quality < 85) { return; }
       if (sig.confluenceCount < 2) { return; }
       notifiedIdsRef.current[sig.id] = true;
-      var title = prefix + ' Q' + sig.quality + ' ' + sig.symbol + ' ' + sig.direction + ' 30m VERIFIED';
-      var body = 'ENTRY ' + formatPrice(sig.entry, sig.symbol) + ' SL ' + formatPrice(sig.stop, sig.symbol) + ' TP ' + formatPrice(sig.tp1, sig.symbol) + ' - ' + formatSA(sig.createdAt) + ' - Locked until TP/SL';
+      await persistNotified();
+      var title = prefix + ' Q' + sig.quality + ' ' + sig.symbol + ' ' + sig.direction + ' 30m';
+      var body = 'ENTRY ' + formatPrice(sig.entry, sig.symbol) + ' SL ' + formatPrice(sig.stop, sig.symbol) + ' TP ' + formatPrice(sig.tp1, sig.symbol) + ' - ' + formatSA(sig.createdAt);
       await Notifications.scheduleNotificationAsync({ content: { title: title, body: body, sound: true }, trigger: null });
+    }
+    async function removeAndRescan(symbolId) {
+      setSignals(function(prev) {
+        var f = [];
+        var i = 0;
+        for (i = 0; i < prev.length; i++) { if (prev[i].symbol !== symbolId) { f.push(prev[i]); } }
+        return f;
+      });
+      await rescanSymbol(symbolId);
     }
     async function rescanSymbol(symbolId) {
       try {
@@ -510,22 +700,20 @@ export default function App() {
         });
         var sig = detectUnified(candles, symbolId, Date.now());
         if (sig && sig.quality >= minQuality) {
+          var exists = false;
+          var cur = signalsRef.current;
+          var ei = 0;
+          for (ei = 0; ei < cur.length; ei++) { if (cur[ei].symbol === symbolId) { exists = true; } }
+          if (exists) { return; }
           setSignals(function(prev) {
             var filtered = [];
             var i = 0;
             for (i = 0; i < prev.length; i++) { if (prev[i].symbol !== symbolId) { filtered.push(prev[i]); } }
             filtered.push(sig);
             filtered.sort(function(a, b) { return b.quality - a.quality; });
-            return filtered.slice(0, 7);
+            return filtered.slice(0, 8);
           });
-          await sendVerified(sig, 'REPLACED');
-        } else {
-          setSignals(function(prev) {
-            var f = [];
-            var i = 0;
-            for (i = 0; i < prev.length; i++) { if (prev[i].symbol !== symbolId) { f.push(prev[i]); } }
-            return f;
-          });
+          await sendSignal(sig, 'REPLACED');
         }
       } catch (e) {}
     }
@@ -562,12 +750,11 @@ export default function App() {
             var n = {};
             var k = '';
             for (k in prev) { n[k] = prev[k]; }
-            n = n;
             for (k in newCandles) { n[k] = newCandles[k]; }
             return n;
           });
           var curSigs = signalsRef.current;
-          var toRescan = [];
+          var toRemove = [];
           var kept = [];
           var h = 0;
           for (h = 0; h < curSigs.length; h++) {
@@ -575,14 +762,14 @@ export default function App() {
             var cp = null;
             if (newPrices[sg.symbol]) { cp = newPrices[sg.symbol].price; }
             else if (pricesRef.current[sg.symbol]) { cp = pricesRef.current[sg.symbol].price; }
-            if (isExpired(sg, Date.now())) { toRescan.push(sg.symbol); continue; }
-            if (isHit(sg, cp)) { toRescan.push(sg.symbol); continue; }
+            if (isExpired(sg, Date.now())) { toRemove.push(sg.symbol); continue; }
+            if (isHit(sg, cp)) { toRemove.push(sg.symbol); continue; }
             kept.push(sg);
           }
-          if (toRescan.length > 0) {
+          if (toRemove.length > 0) {
             setSignals(kept);
             var rr = 0;
-            for (rr = 0; rr < toRescan.length; rr++) { rescanSymbol(toRescan[rr]); }
+            for (rr = 0; rr < toRemove.length; rr++) { await removeAndRescan(toRemove[rr]); }
           }
         }
       } catch (e) {}
@@ -605,7 +792,6 @@ export default function App() {
           if (curPrices[ex.symbol]) { cp2 = curPrices[ex.symbol].price; }
           if (isExpired(ex, now)) { continue; }
           if (isHit(ex, cp2)) { continue; }
-          if (!ex.verified) { continue; }
           activeMap[ex.symbol] = ex;
           activeList.push(ex);
         }
@@ -626,11 +812,16 @@ export default function App() {
         if (newSignals.length > 0) {
           var combined = activeList.concat(newSignals);
           combined.sort(function(a, b) { return b.quality - a.quality; });
-          setSignals(combined.slice(0, 7));
+          var capped = combined.slice(0, 8);
+          setSignals(capped);
+          await saveStoredSignals(capped);
           var fn = 0;
-          for (fn = 0; fn < newSignals.length; fn++) { await sendVerified(newSignals[fn], 'NEW'); }
+          for (fn = 0; fn < newSignals.length; fn++) { await sendSignal(newSignals[fn], 'NEW'); }
         } else {
-          if (activeList.length !== curSignals.length) { setSignals(activeList); }
+          if (activeList.length !== curSignals.length) {
+            setSignals(activeList);
+            await saveStoredSignals(activeList);
+          }
         }
         var ffNews = await fetchForexFactoryNews();
         if (mounted) { setNews(ffNews); }
@@ -648,7 +839,7 @@ export default function App() {
                 var aff = false;
                 var ai = 0;
                 for (ai = 0; ai < ev.affectedSymbols.length; ai++) { if (ev.affectedSymbols[ai] === pool[pi].symbol) { aff = true; } }
-                if (aff && pool[pi].verified) { if (!best || pool[pi].quality > best.quality) { best = pool[pi]; } }
+                if (aff) { if (!best || pool[pi].quality > best.quality) { best = pool[pi]; } }
               }
               if (best) {
                 evtMap[ev.id] = best;
@@ -658,8 +849,9 @@ export default function App() {
                 var eventKey = ev.id + '-' + keyPart;
                 if ((diffM === 60 || diffM === 30 || diffM === 15) && !notifiedEventRef.current[eventKey]) {
                   notifiedEventRef.current[eventKey] = true;
+                  await persistNotified();
                   var etitle = ev.currency + ' HIGH in ' + diffM + 'm - ' + ev.title;
-                  var ebody = 'BEST EVENT SIGNAL: ' + best.symbol + ' ' + best.direction + ' ENTRY ' + formatPrice(best.entry, best.symbol) + ' SL ' + formatPrice(best.stop, best.symbol) + ' TP ' + formatPrice(best.tp1, best.symbol) + ' - ' + formatSA(ev.time);
+                  var ebody = 'BEST: ' + best.symbol + ' ' + best.direction + ' ENTRY ' + formatPrice(best.entry, best.symbol) + ' SL ' + formatPrice(best.stop, best.symbol) + ' TP ' + formatPrice(best.tp1, best.symbol) + ' - ' + formatSA(ev.time);
                   await Notifications.scheduleNotificationAsync({ content: { title: etitle, body: ebody, sound: true }, trigger: null });
                 }
               }
@@ -673,8 +865,26 @@ export default function App() {
     }
     (async function() {
       await Notifications.requestPermissionsAsync();
+      await syncNotified();
       try {
         await Notifications.setNotificationChannelAsync('meridian-alerts', { name: 'Meridian Alerts', importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 250, 250, 250], lightColor: '#D4AF37' });
+      } catch (e) {}
+      try {
+        var isReg = await TaskManager.isTaskRegisteredAsync(BG_TASK);
+        if (!isReg) {
+          await BackgroundFetch.registerTaskAsync(BG_TASK, { minimumInterval: 15 * 60, stopOnTerminate: false, startOnBoot: true });
+        }
+      } catch (e) {}
+      try {
+        var stored = await loadStoredSignals();
+        if (stored && stored.length > 0) {
+          var valid = [];
+          var vi = 0;
+          for (vi = 0; vi < stored.length; vi++) {
+            if (!isExpired(stored[vi], Date.now())) { valid.push(stored[vi]); }
+          }
+          if (valid.length > 0) { setSignals(valid); }
+        }
       } catch (e) {}
       await fetchAll();
       await runScan(true);
@@ -685,21 +895,21 @@ export default function App() {
       var now2 = Date.now();
       var cur2 = signalsRef.current;
       var pr2 = pricesRef.current;
-      var toRescan2 = [];
+      var toRemove2 = [];
       var kept2 = [];
       var i2 = 0;
       for (i2 = 0; i2 < cur2.length; i2++) {
         var sg2 = cur2[i2];
         var cp3 = null;
         if (pr2[sg2.symbol]) { cp3 = pr2[sg2.symbol].price; }
-        if (isExpired(sg2, now2)) { toRescan2.push(sg2.symbol); continue; }
-        if (isHit(sg2, cp3)) { toRescan2.push(sg2.symbol); continue; }
+        if (isExpired(sg2, now2)) { toRemove2.push(sg2.symbol); continue; }
+        if (isHit(sg2, cp3)) { toRemove2.push(sg2.symbol); continue; }
         kept2.push(sg2);
       }
-      if (toRescan2.length > 0) {
+      if (toRemove2.length > 0) {
         setSignals(kept2);
         var r2 = 0;
-        for (r2 = 0; r2 < toRescan2.length; r2++) { rescanSymbol(toRescan2[r2]); }
+        for (r2 = 0; r2 < toRemove2.length; r2++) { removeAndRescan(toRemove2[r2]); }
       }
     }, 5000);
     newsInt = setInterval(async function() {
@@ -712,18 +922,19 @@ export default function App() {
           var evKey = curNews[i3].id + '-' + diffM2;
           if (notifiedEventRef.current[evKey]) { continue; }
           notifiedEventRef.current[evKey] = true;
+          await persistNotified();
           var best2 = null;
           var si2 = 0;
           for (si2 = 0; si2 < curSigs2.length; si2++) {
             var aff2 = false;
             var ai2 = 0;
             for (ai2 = 0; ai2 < curNews[i3].affectedSymbols.length; ai2++) { if (curNews[i3].affectedSymbols[ai2] === curSigs2[si2].symbol) { aff2 = true; } }
-            if (aff2 && curSigs2[si2].verified) { if (!best2 || curSigs2[si2].quality > best2.quality) { best2 = curSigs2[si2]; } }
+            if (aff2) { if (!best2 || curSigs2[si2].quality > best2.quality) { best2 = curSigs2[si2]; } }
           }
           var body2 = curNews[i3].title + ' - ' + formatSAFull(curNews[i3].time);
           if (best2) { body2 = 'BEST: ' + best2.symbol + ' ' + best2.direction + ' ENTRY ' + formatPrice(best2.entry, best2.symbol) + ' SL ' + formatPrice(best2.stop, best2.symbol) + ' TP ' + formatPrice(best2.tp1, best2.symbol) + ' - ' + body2; }
-          else { body2 = body2 + ' - No verified signal yet, scanning affected symbols...'; }
-          await Notifications.scheduleNotificationAsync({ content: { title: curNews[i3].currency + ' HIGH in ' + diffM2 + 'm SAST - EVENT SIGNAL', body: body2, sound: true }, trigger: null });
+          else { body2 = body2 + ' - No signal yet, scanning...'; }
+          await Notifications.scheduleNotificationAsync({ content: { title: curNews[i3].currency + ' HIGH in ' + diffM2 + 'm SAST', body: body2, sound: true }, trigger: null });
         }
       }
     }, 30000);
@@ -758,9 +969,6 @@ export default function App() {
         <StatusBar style="light" />
         <View style={styles.header}>
           <Text style={styles.headerTitle}>MERIDIAN</Text>
-          <TouchableOpacity onPress={function() { setShowSettings(true); }} style={styles.bellBtn}>
-            <Text style={styles.bellIcon}>...</Text>
-          </TouchableOpacity>
         </View>
         <ScrollView horizontal={true} showsHorizontalScrollIndicator={false} style={styles.tickerWrap} contentContainerStyle={styles.tickerContent}>
           {SYMBOLS.map(function(s) {
@@ -780,9 +988,8 @@ export default function App() {
         </ScrollView>
         <View style={styles.tfRow}>
           <View style={[styles.tfBtn, styles.tfActive]}>
-            <Text style={styles.tfTextActive}>30m - Verified 2+ Strategies LOCKED</Text>
+            <Text style={styles.tfTextActive}>30m</Text>
           </View>
-          <Text style={styles.tfNote}>1 per symbol until TP/SL</Text>
         </View>
         <View style={styles.main}>
           {activeTab === 'Chart' && (
@@ -810,7 +1017,7 @@ export default function App() {
                   </View>
                   <View style={styles.detailCol}>
                     <Text style={styles.detailLabel}>{formatSA(signalForSelected.createdAt)}</Text>
-                    <Text style={styles.detailValue}>{'Q' + signalForSelected.quality + ' ' + signalForSelected.direction + ' VERIFIED'}</Text>
+                    <Text style={styles.detailValue}>{'Q' + signalForSelected.quality + ' ' + signalForSelected.direction}</Text>
                   </View>
                 </View>
               )}
@@ -822,23 +1029,23 @@ export default function App() {
                 return (
                   <TouchableOpacity key={s.id} style={styles.setupCard} onPress={function() { setSelectedSymbol(s.symbol); setActiveTab('Chart'); }}>
                     <View style={styles.setupTop}>
-                      <Text style={styles.setupSymbol}>{s.symbol + ' 30m ' + s.direction + ' Q' + s.quality + ' VERIFIED'}</Text>
+                      <Text style={styles.setupSymbol}>{s.symbol + ' 30m ' + s.direction + ' Q' + s.quality}</Text>
                       <Text style={styles.setupTime}>{formatSA(s.createdAt)}</Text>
                     </View>
                     <Text style={styles.setupDesc}>{'ENTRY ' + formatPrice(s.entry, s.symbol) + ' STOP ' + formatPrice(s.stop, s.symbol) + ' TP ' + formatPrice(s.tp1, s.symbol)}</Text>
-                    <Text style={styles.setupMeta}>{s.strategy + ' - Locked until TP/SL - ' + s.confluenceCount + ' strategies agree'}</Text>
+                    <Text style={styles.setupMeta}>{s.strategy}</Text>
                   </TouchableOpacity>
                 );
               })}
               {filteredSignals.length === 0 && (
-                <Text style={styles.emptyText}>Scanning 30m - only verified 2+ strategy signals...</Text>
+                <Text style={styles.emptyText}>Scanning 30m...</Text>
               )}
             </ScrollView>
           )}
           {activeTab === 'News' && (
             <ScrollView style={{ flex: 1 }}>
               <View style={{ padding: 10 }}>
-                <Text style={styles.sectionTitle}>HIGH IMPACT - Next 3h (SAST) - ForexFactory.com - With Best Event Signal</Text>
+                <Text style={styles.sectionTitle}>HIGH IMPACT - Next 3h (SAST) - ForexFactory.com</Text>
               </View>
               {imminent.map(function(ev) {
                 var bestSig = bestForEvent(ev);
@@ -852,11 +1059,11 @@ export default function App() {
                     <Text style={styles.setupMeta}>{'Affects: ' + ev.affectedSymbols.join(', ')}</Text>
                     {bestSig ? (
                       <View style={styles.eventSignalBox}>
-                        <Text style={styles.eventSignalTitle}>BEST SIGNAL TO TRADE THIS EVENT:</Text>
+                        <Text style={styles.eventSignalTitle}>BEST SIGNAL FOR THIS EVENT:</Text>
                         <Text style={styles.eventSignalText}>{bestSig.symbol + ' ' + bestSig.direction + ' Q' + bestSig.quality + ' ENTRY ' + formatPrice(bestSig.entry, bestSig.symbol) + ' SL ' + formatPrice(bestSig.stop, bestSig.symbol) + ' TP ' + formatPrice(bestSig.tp1, bestSig.symbol)}</Text>
                       </View>
                     ) : (
-                      <Text style={styles.setupMeta}>Scanning affected symbols for verified signal...</Text>
+                      <Text style={styles.setupMeta}>Scanning...</Text>
                     )}
                   </View>
                 );
@@ -887,23 +1094,6 @@ export default function App() {
             <Text style={[styles.tabLabel, activeTab === 'News' && styles.tabActive]}>{'News ' + news.length}</Text>
           </TouchableOpacity>
         </View>
-        <Modal visible={showSettings} animationType="slide" transparent={true}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>MERIDIAN v9.1 - Accurate Verified</Text>
-                <TouchableOpacity onPress={function() { setShowSettings(false); }}>
-                  <Text style={styles.modalClose}>X</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView>
-                <Text style={styles.modalSection}>v9.1 FIXES</Text>
-                <Text style={styles.settingDesc}>1. Fixed Expo build: removed background-fetch and task-manager which broke createBundleReleaseJsAndAssets. 2. Fixed TP orientation: SELL TP below entry, BUY TP above. 3. Requires 2+ strategies, RRR 1.5+, RSI + ATR + EMA. 4. Instant replacement: hit check every 5s + immediate check on price update. 5. Notifications deduped - only verified locked tradable. 6. Event signals: News tab shows BEST signal for each HIGH event, notifications at 60/30/15m with that signal.</Text>
-                <View style={{ height: 40 }} />
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -912,8 +1102,6 @@ var styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, backgroundColor: '#0a0a0a', borderBottomWidth: 1, borderBottomColor: '#1c1c1e' },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '900', letterSpacing: 1 },
-  bellBtn: { padding: 6 },
-  bellIcon: { color: '#8a8a8e', fontSize: 18 },
   tickerWrap: { maxHeight: 68, backgroundColor: '#0a0a0a' },
   tickerContent: { paddingHorizontal: 8, paddingVertical: 6 },
   tickerItem: { backgroundColor: '#141416', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8, minWidth: 96, borderWidth: 1, borderColor: '#1c1c1e' },
@@ -924,7 +1112,6 @@ var styles = StyleSheet.create({
   tfBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#1c1c1e', marginRight: 6 },
   tfActive: { backgroundColor: '#D4AF37' },
   tfTextActive: { color: '#0a0a0a', fontSize: 11, fontWeight: '800' },
-  tfNote: { color: '#5a5a5e', fontSize: 10, marginLeft: 8 },
   main: { flex: 1, backgroundColor: '#0a0a0a' },
   symbolInfo: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#0e0e10' },
   symbolTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
@@ -942,18 +1129,11 @@ var styles = StyleSheet.create({
   setupMeta: { color: '#8a8a8e', fontSize: 10, marginTop: 4 },
   newsCard: { backgroundColor: '#141416', marginHorizontal: 10, marginVertical: 6, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#1c1c1e' },
   newsTitle: { color: '#fff', fontSize: 12, fontWeight: '700', flex: 1 },
-  emptyText: { color: '#5a5a5e', fontSize: 12, textAlign: 'center', padding: 30 },
+  emptyText: { color: '#5a5a8e', fontSize: 12, textAlign: 'center', padding: 30 },
   bottomTabs: { flexDirection: 'row', backgroundColor: '#0e0e10', borderTopWidth: 1, borderTopColor: '#1c1c1e', paddingVertical: 8 },
   tabBtn: { flex: 1, alignItems: 'center', paddingVertical: 6 },
   tabLabel: { color: '#8a8a8e', fontSize: 12, fontWeight: '600' },
   tabActive: { color: '#D4AF37' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#141416', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%', paddingBottom: 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1c1c1e' },
-  modalTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  modalClose: { color: '#8a8a8e', fontSize: 18, paddingHorizontal: 8 },
-  modalSection: { color: '#D4AF37', fontSize: 11, fontWeight: '800', marginTop: 18, marginBottom: 8, paddingHorizontal: 16 },
-  settingDesc: { color: '#8a8a8e', fontSize: 11, lineHeight: 16, paddingHorizontal: 16, marginBottom: 8 },
   sectionTitle: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 8 },
   newsRow: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1c1c1e', alignItems: 'center' },
   newsTime: { color: '#D4AF37', fontSize: 10, fontWeight: '700', width: 110 },
